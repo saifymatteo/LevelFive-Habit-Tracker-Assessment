@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 2 — FastAPI survival kit</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<h1>Lesson 2 — FastAPI survival kit</h1>
+<div class="meta">
+  <span class="chip">⏱ ~20 min</span>
+  <span class="chip">Skill: read &amp; modify any endpoint</span>
+  <span class="chip">Prereq: Lesson 1</span>
+</div>
+
+<p><strong>Win of this lesson:</strong> you can read any endpoint in this repo and predict exactly what it does — and add a new one that follows the house style. Every endpoint here is built from the same four patterns. Learn the four, and "add/modify functionality" becomes filling in a form.</p>
+
+<p>Dart analogy up front: FastAPI is to Python what <code>shelf</code> + strong codegen would be to Dart — decorators declare routes, type hints declare validation, <code>Depends</code> is dependency injection like Flutter's <code>Provider</code>, but function-argument based.</p>
+
+<h2>Pattern 1 — Route decorators</h2>
+<pre><code>@router.get("/{habit_id}/logs")          # method + path template
+def habit_logs(
+    habit_id: int,                       # path param, auto-parsed &amp; typed
+    limit: int | None = None,            # query param (?limit=5), optional
+    db: Session = Depends(get_db),       # Pattern 3
+    user: User = Depends(get_current_user),  # Pattern 4
+):
+    ...</code></pre>
+<ul>
+  <li>The <strong>function signature is the request schema</strong>. Path params come from the URL template, everything else defaults to query params.</li>
+  <li>The router is mounted with a prefix in <code>main.py</code>: <code>app.include_router(habits.router, prefix="/api/habits")</code>. So <code>@router.get("")</code> = <code>GET /api/habits</code>. Order matters: <code>/search</code> is declared before <code>/{habit_id}</code> so "search" isn't captured as an id.</li>
+  <li>Type hints aren't decoration — <code>habit_id: int</code> means a request to <code>/habits/abc</code> returns a clean <strong>422 validation error</strong> before your code runs.</li>
+</ul>
+
+<h2>Pattern 2 — Pydantic request bodies</h2>
+<pre><code>class HabitIn(BaseModel):
+    name: str
+    emoji: str | None = None
+    cadence: str | None = "daily"
+    target_per_week: int | None = 7
+
+@router.post("")
+def create_habit(payload: HabitIn, ...):</code></pre>
+<p>Annotate the parameter with a <code>BaseModel</code> and FastAPI parses + validates the JSON body. Missing required field → automatic <strong>422</strong> with a precise error list. Wrong types → 422. You write zero validation code for the common case, and <code>payload.name</code> is a plain typed attribute.</p>
+
+<h2>Pattern 3 — Depends(get_db): the session per request</h2>
+<pre><code>def get_db():                 # database.py — a "generator dependency"
+    db = SessionLocal()
+    try:
+        yield db              # handler runs with this session
+    finally:
+        db.close()            # always runs, even if the handler raises</code></pre>
+<ul>
+  <li>One SQLAlchemy <code>Session</code> per request, created before and closed after. This is the repo's unit of work — like Eloquent's connection-per-request in Laravel.</li>
+  <li>All reads/writes go through <code>db</code>: <code>db.query(Habit).filter(...)</code>, <code>db.add(obj)</code>, <code>db.commit()</code>, <code>db.get(Habit, id)</code> (primary-key lookup), <code>db.delete(obj)</code>.</li>
+  <li>Nothing is written until <code>commit()</code>. That's the #1 beginner bug: you <code>db.add()</code> and wonder why the row isn't there.</li>
+</ul>
+
+<h2>Pattern 4 — Depends(get_current_user): auth as a chain</h2>
+<pre><code>def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),       # dependencies can depend on dependencies
+) -&gt; User:
+    ...  # parses "Bearer <token>", loads User, or raises 401
+
+user: User = Depends(get_current_user)   # in every protected endpoint</code></pre>
+<p>By the time your handler runs, <code>user</code> is a real ORM object or the request already failed with 401. Note what this repo's version does <em>not</em> do: no signature check, no expiry — the token <em>is</em> the user id. You'll justify a proper fix in Lesson 4; for now, know that <code>Bearer 2</code> logs you in as user2.</p>
+
+<h2>Pattern 5 (bonus) — failing &amp; returning</h2>
+<pre><code>raise HTTPException(status_code=404, detail="Habit not found")  # error path
+return {"id": habit.id, "name": habit.name}                      # success: any dict → JSON</code></pre>
+<p><code>HTTPException</code> short-circuits the request into a JSON <code>{"detail": ...}</code> response with the status you chose. Handlers return plain dicts — FastAPI serializes them (dates become ISO strings via the model fields you pick).</p>
+
+<div class="callout">
+  <span class="label">Sync vs async, one line</span>
+  These handlers are plain <code>def</code>, so FastAPI runs each in a threadpool — blocking calls (like that <code>time.sleep(0.35)</code> in <code>checkin</code>) tie up a worker thread, not the whole event loop. Don't convert anything to <code>async def</code> on Friday "because async is faster" — with sync SQLAlchemy sessions, plain <code>def</code> is the correct house style.
+</div>
+
+<h2>Lab — feel validation work (5 min)</h2>
+<ol class="steps">
+  <li>Open <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a>, authorize with token <code>1</code>.</li>
+  <li><code>POST /api/habits</code> with body <code>{}</code> → read the 422 response: it names the missing field <code>name</code>.</li>
+  <li>Retry with <code>{"name": "Assessment prep"}</code> → 200, and the habit appears in the UI at localhost:5173.</li>
+  <li><code>GET /api/habits/9999</code>… actually try <code>DELETE /api/habits/9999</code> → read the 404 <code>detail</code>. That's <code>HTTPException</code> doing its job.</li>
+</ol>
+
+<h2>Check yourself</h2>
+<div id="quiz" class="quiz"></div>
+
+<div class="ask">💬 <strong>Stuck or curious?</strong> Ask your teacher (the agent). Good next questions: "how would I add a query param?", "what's the difference between db.get and db.query?", "why 422 and not 400?"</div>
+
+<div class="lesson-nav">
+  <a href="0001-run-it-and-trace-a-request.html">← Lesson 1: run it &amp; trace a request</a>
+  <a href="../reference/0001-endpoint-map.html">Reference: endpoint map &amp; runbook</a>
+  <span>Next session → Lesson 3: SQLAlchemy &amp; SQL in this repo</span>
+</div>
+
+<p><strong>Primary source for deeper reading:</strong> <a href="https://fastapi.tiangolo.com/tutorial/dependencies/">FastAPI — Dependencies</a> (official tutorial; the exact mechanism Patterns 3–4 use).</p>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script>
+renderQuiz(document.getElementById("quiz"), {
+  title: "Check yourself",
+  questions: [
+    {
+      q: "Request-body validation in this repo is done by…",
+      options: [
+        { text: "Pydantic models", correct: true, why: "HabitIn / LoginIn extend BaseModel; FastAPI validates the JSON body against them and returns 422 on failure." },
+        { text: "SQLAlchemy models", correct: false, why: "SQLAlchemy models describe database tables, not incoming request payloads." },
+        { text: "manual if-statements", correct: false, why: "Only the rare custom check exists (name is required); the heavy lifting is Pydantic's." }
+      ]
+    },
+    {
+      q: "Depends(get_db) provides each request with…",
+      options: [
+        { text: "a fresh database session", correct: true, why: "SessionLocal() per request, closed in the finally block — the request's unit of work." },
+        { text: "a shared global engine", correct: false, why: "The engine is global, but sessions are per-request; sharing one session across requests would corrupt state." },
+        { text: "a database connection string", correct: false, why: "The connection string lives in DATABASE_URL; get_db hands you a live Session object." }
+      ]
+    },
+    {
+      q: "Raising HTTPException(status_code=404, detail=...) returns…",
+      options: [
+        { text: "status 404 with a JSON detail", correct: true, why: "FastAPI converts it into {\"detail\": \"...\"} with your status code — the repo's universal error style." },
+        { text: "status 500 with a stack trace", correct: false, why: "Only unhandled exceptions produce 500s; HTTPException is the controlled path." },
+        { text: "an HTML error page", correct: false, why: "This is an API — errors are JSON bodies, not rendered pages." }
+      ]
+    },
+    {
+      q: "Dependencies declared via Depends run…",
+      options: [
+        { text: "before the route handler", correct: true, why: "FastAPI resolves the whole dependency tree first; by handler time, db and user already exist (or the request already failed)." },
+        { text: "after the route handler", correct: false, why: "Cleanup (session close) happens after via the generator's finally — but resolution itself is before." },
+        { text: "only when explicitly awaited", correct: false, why: "No awaiting needed — FastAPI invokes dependencies automatically when building the call." }
+      ]
+    },
+    {
+      q: "This repo's sync def endpoints are executed by FastAPI…",
+      options: [
+        { text: "in a worker threadpool", correct: true, why: "Sync def handlers run in FastAPI's threadpool, so blocking sleep(0.35) hogs a thread but not the event loop." },
+        { text: "on the event loop", correct: false, why: "That's async def behaviour — and why blocking calls inside async handlers are dangerous here." },
+        { text: "in separate processes", correct: false, why: "One uvicorn process, multiple threads for sync handlers; no process spawning per request." }
+      ]
+    }
+  ]
+});
+</script>
+</body>
+</html>

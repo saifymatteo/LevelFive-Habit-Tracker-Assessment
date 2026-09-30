@@ -1,0 +1,122 @@
+/* Habit Tracker assessment prep — shared course stylesheet */
+:root {
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --paper: #fdfdfb;
+  --accent: #1a5fb4;
+  --accent-soft: #eaf2fc;
+  --good: #26a269;
+  --good-soft: #e8f5ee;
+  --bad: #c01c28;
+  --bad-soft: #fbe9ea;
+  --warn: #c64600;
+  --warn-soft: #fdf0e5;
+  --line: #e3e1da;
+  --code-bg: #f4f2ec;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.wrap { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+
+h1, h2, h3 { font-family: "Helvetica Neue", Arial, sans-serif; line-height: 1.25; }
+h1 { font-size: 1.9rem; margin: 0 0 .4rem; }
+h2 { font-size: 1.25rem; margin: 2.4rem 0 .6rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 .4rem; }
+
+p { margin: .6rem 0; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: .85em;
+  background: var(--code-bg);
+  padding: .1em .35em;
+  border-radius: 4px;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+
+.meta { display: flex; gap: .5rem; flex-wrap: wrap; margin: .6rem 0 1.5rem; }
+.chip {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: .72rem; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--line);
+  padding: .2rem .6rem; border-radius: 999px; background: #fff;
+}
+
+.callout { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: .8rem 1rem; border-radius: 0 8px 8px 0; margin: 1.2rem 0; }
+.callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+.callout.good { border-color: var(--good); background: var(--good-soft); }
+.callout .label { font-family: "Helvetica Neue", Arial, sans-serif; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: .2rem; }
+
+.steps { counter-reset: step; list-style: none; padding-left: 0; margin: 1rem 0; }
+.steps li { counter-increment: step; position: relative; padding-left: 2.4rem; margin: .8rem 0; }
+.steps li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: .1rem;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  font-family: "Helvetica Neue", Arial, sans-serif; font-size: .85rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+table { border-collapse: collapse; width: 100%; font-size: .85rem; margin: 1rem 0; font-family: "Helvetica Neue", Arial, sans-serif; }
+th, td { border: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+td code, th code { font-size: .9em; }
+
+/* Architecture diagram */
+.diagram { display: flex; flex-direction: column; gap: .5rem; align-items: stretch; margin: 1.4rem 0; font-family: "Helvetica Neue", Arial, sans-serif; }
+.diagram .row { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+.diagram .node {
+  border: 2px solid var(--accent); border-radius: 10px; padding: .55rem .9rem;
+  background: #fff; text-align: center; min-width: 9rem;
+}
+.diagram .node .t { font-weight: 700; font-size: .9rem; }
+.diagram .node .d { font-size: .72rem; color: var(--muted); }
+.diagram .arrow { text-align: center; color: var(--muted); font-size: .8rem; }
+
+/* Quiz */
+.quiz { border: 1px solid var(--line); border-radius: 12px; padding: 1.2rem 1.4rem; margin: 1.6rem 0; background: #fff; }
+.quiz h3 { margin-top: 0; }
+.quiz .q { margin: 1.1rem 0; }
+.quiz .q p { font-weight: 700; font-family: "Helvetica Neue", Arial, sans-serif; font-size: .95rem; margin-bottom: .5rem; }
+.quiz .opts { display: flex; flex-direction: column; gap: .4rem; }
+.quiz button.opt {
+  font-family: "Helvetica Neue", Arial, sans-serif; font-size: .9rem;
+  text-align: left; padding: .5rem .8rem; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--paper); cursor: pointer;
+}
+.quiz button.opt:hover { border-color: var(--accent); }
+.quiz button.opt.correct { border-color: var(--good); background: var(--good-soft); font-weight: 700; }
+.quiz button.opt.wrong { border-color: var(--bad); background: var(--bad-soft); }
+.quiz .why { display: none; font-size: .85rem; color: var(--muted); margin-top: .4rem; padding-left: .4rem; border-left: 3px solid var(--line); }
+.quiz .why.show { display: block; }
+.quiz .score { font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 700; margin-top: 1rem; }
+
+.lesson-nav { display: flex; gap: 1rem; flex-wrap: wrap; font-family: "Helvetica Neue", Arial, sans-serif; font-size: .85rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.ask { background: var(--accent-soft); border: 1px dashed var(--accent); border-radius: 10px; padding: .8rem 1rem; font-size: .9rem; margin: 1.5rem 0; }
+
+@media print {
+  .quiz .why { display: block; }
+  body { font-size: 11pt; }
+  .wrap { max-width: none; }
+}

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reference 1 — Endpoint map, runbook &amp; glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<h1>Reference 1 — Endpoint map, runbook &amp; glossary</h1>
+<div class="meta">
+  <span class="chip">Reference · print me</span>
+  <span class="chip">Companion to Lessons 1–2</span>
+</div>
+
+<p>Everything you need open on a second monitor during the assessment. Line numbers refer to the current files on disk.</p>
+
+<h2>Endpoints</h2>
+<table>
+  <thead><tr><th>Method &amp; path</th><th>Inputs</th><th>Does</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /api/healthz</code></td><td>—</td><td>Smoke test, returns <code>{"ok": true}</code></td><td><code>main.py:33</code></td></tr>
+    <tr><td><code>POST /api/login</code></td><td>body <code>{email, password}</code></td><td>Plaintext compare; returns <code>token</code> (= user id) + <code>user</code></td><td><code>routers/auth_routes.py:16</code></td></tr>
+    <tr><td><code>GET /api/dashboard</code></td><td>query <code>user_id?</code></td><td>Totals, per-habit streaks, 84-day heatmap. Loads <em>all</em> logs of the owner</td><td><code>routers/stats.py:15</code></td></tr>
+    <tr><td><code>GET /api/habits/search</code></td><td>query <code>q</code></td><td>Cross-user name search (raw SQL, <strong>f-string interpolated</strong>)</td><td><code>routers/habits.py:26</code></td></tr>
+    <tr><td><code>GET /api/habits</code></td><td>query <code>user_id?</code></td><td>Owner's non-archived habits + total completions + today_done (2 extra queries per habit)</td><td><code>routers/habits.py:44</code></td></tr>
+    <tr><td><code>POST /api/habits</code></td><td>body <code>HabitIn</code></td><td>Create habit for current user</td><td><code>routers/habits.py:86</code></td></tr>
+    <tr><td><code>DELETE /api/habits/{id}</code></td><td>path id</td><td>Deletes habit + all its logs (no owner check)</td><td><code>routers/habits.py:117</code></td></tr>
+    <tr><td><code>POST /api/habits/{id}/checkin</code></td><td>path id</td><td>Insert today's HabitLog; 409 if exists; bumps in-memory streak cache; sleeps 0.35s</td><td><code>routers/habits.py:133</code></td></tr>
+    <tr><td><code>POST /api/habits/{id}/cheer</code></td><td>path id</td><td>Increments <code>cheers</code> (read-modify-write; no owner check)</td><td><code>routers/habits.py:157</code></td></tr>
+    <tr><td><code>GET /api/habits/{id}/logs</code></td><td>path id, query <code>limit?</code></td><td>All log rows, newest first, optional limit</td><td><code>routers/habits.py:171</code></td></tr>
+    <tr><td><code>GET /api/habits/{id}/stats</code></td><td>path id</td><td>current/best streak, rate30, last-7; loads <em>all</em> logs of the habit</td><td><code>routers/habits.py:194</code></td></tr>
+  </tbody>
+</table>
+
+<p>Helper maths in <code>analytics.py</code>: <code>current_streak</code> walks back from <em>today</em> (0 if today unchecked), <code>best_streak</code> sorts + counts runs, <code>completion_rate</code> = hits ÷ 30.</p>
+
+<h2>Runbook</h2>
+<table>
+  <thead><tr><th>Task</th><th>Command</th></tr></thead>
+  <tbody>
+    <tr><td>Start everything</td><td><code>docker compose up --build</code></td></tr>
+    <tr><td>Background + logs</td><td><code>docker compose up -d</code> then <code>docker compose logs -f backend</code></td></tr>
+    <tr><td>Full reset (wipes data)</td><td><code>docker compose down -v</code> (removes <code>pgdata</code>; seed re-runs on next up)</td></tr>
+    <tr><td>SQL shell</td><td><code>docker compose exec db psql -U habit -d habitdb</code></td></tr>
+    <tr><td>Row counts</td><td><code>SELECT (SELECT count(*) FROM users) u, (SELECT count(*) FROM habits) h, (SELECT count(*) FROM habit_logs) l;</code></td></tr>
+    <tr><td>Inspect a habit's logs</td><td><code>SELECT log_date, note FROM habit_logs WHERE habit_id = 1 ORDER BY log_date DESC LIMIT 10;</code></td></tr>
+    <tr><td>Interactive API docs</td><td>Browser → <code>localhost:8000/docs</code> (Authorize with token <code>1</code>)</td></tr>
+    <tr><td>App</td><td>Browser → <code>localhost:5173</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn"><span class="label">Code changes need a restart</span>
+The backend Dockerfile runs uvicorn <em>without</em> <code>--reload</code>. After editing Python: <code>docker compose up --build backend</code>. After editing frontend: <code>docker compose up --build frontend</code> (full npm build each time — slow). For fast frontend iteration: <code>cd frontend &amp;&amp; npm install &amp;&amp; npm run dev</code> — Vite's proxy sends <code>/api</code> to localhost:8000.</div>
+
+<h2>Demo accounts</h2>
+<table>
+  <thead><tr><th>Email</th><th>Password</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>admin@habit.app</code></td><td><code>demo123</code></td><td>2 habits</td></tr>
+    <tr><td><code>user1@habit.app</code></td><td><code>demo123</code></td><td>~50 habits, ~62k log rows — the perf test case</td></tr>
+    <tr><td><code>user2@habit.app</code></td><td><code>demo123</code></td><td>2 habits</td></tr>
+  </tbody>
+</table>
+<p>Seed is deterministic (<code>random.seed(42)</code>) and runs on every fresh database: 1460 days of history, some habits get a guaranteed streak tail (45/12/5 days for user1's first three). The login form's prefilled <code>demo@habit.app</code> does not exist.</p>
+
+<h2>Glossary (use these words)</h2>
+<table>
+  <thead><tr><th>Term</th><th>Meaning in this repo</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Habit</strong></td><td>A trackable routine owned by a user: name, emoji, cadence, target_per_week, cheers counter, archived flag</td></tr>
+    <tr><td><strong>HabitLog</strong></td><td>One completed day of one habit: (habit_id, log_date, optional note). The check-in event</td></tr>
+    <tr><td><strong>Check-in</strong></td><td>Creating today's HabitLog. One per habit per day (enforced in the handler, 409 otherwise)</td></tr>
+    <tr><td><strong>Streak</strong></td><td>Consecutive days with a log. <em>Current</em> counts back from today; <em>best</em> is the longest run ever</td></tr>
+    <tr><td><strong>Cheer</strong></td><td>A counter on a habit incremented by any authenticated user</td></tr>
+    <tr><td><strong>Cadence / target_per_week</strong></td><td>Stored on the habit but currently unused by any logic — display-only fields</td></tr>
+    <tr><td><strong>Heatmap</strong></td><td>84 days (12 weeks) of daily total check-in counts across the owner's habits</td></tr>
+    <tr><td><strong>rate30</strong></td><td>Completion rate over the last 30 days (0.0–1.0)</td></tr>
+    <tr><td><strong>Seed</strong></td><td>Deterministic demo data created on startup when the users table is empty</td></tr>
+    <tr><td><strong>Archived</strong></td><td>Soft-delete flag; excluded from <code>GET /api/habits</code> but <em>included</em> in the dashboard</td></tr>
+  </tbody>
+</table>
+
+<h2>How work is expected to happen here (repo conventions)</h2>
+<ul>
+  <li>Features are spec'd in <code>.scratch/&lt;feature-slug&gt;/spec.md</code>, with one ticket per file in <code>.scratch/&lt;feature-slug&gt;/issues/01-&lt;slug&gt;.md</code> and a <code>Status:</code> line (see <code>docs/agents/issue-tracker.md</code>).</li>
+  <li>Domain vocabulary would live in <code>CONTEXT.md</code>, decisions in <code>docs/adr/</code> (see <code>docs/agents/domain.md</code>) — neither exists yet; creating them when you make a real decision is a plus, not a requirement.</li>
+  <li>There are <strong>no tests</strong> in the repo. Adding even a smoke test for your change is differentiating.</li>
+  <li>The git repo has no commits — an early <code>git add -A &amp;&amp; git commit -m "baseline"</code> gives you a diff to show your work.</li>
+</ul>
+
+<div class="lesson-nav">
+  <a href="../lessons/0001-run-it-and-trace-a-request.html">← Lesson 1</a>
+  <a href="../lessons/0002-fastapi-survival-kit.html">← Lesson 2</a>
+</div>
+
+</div>
+</body>
+</html>

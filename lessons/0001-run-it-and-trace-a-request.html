@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 1 — Run it, then trace one request</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<h1>Lesson 1 — Run it, then trace one request</h1>
+<div class="meta">
+  <span class="chip">⏱ ~15 min</span>
+  <span class="chip">Skill: run + read the system</span>
+  <span class="chip">Mission: assessment-ready</span>
+</div>
+
+<p><strong>Win of this lesson:</strong> the app runs on your machine, you can log in, and you can explain how a login click becomes a database row — the mental model every assessment task will hang off.</p>
+
+<h2>1 · Start the stack</h2>
+<p>You know Docker — this is the one command, plus what's unusual about <em>this</em> compose file:</p>
+
+<pre><code>cd D:/Git/interview-coding-test-main
+docker compose up --build</code></pre>
+
+<ul class="steps">
+  <li><strong>db</strong> starts first: postgres:16-alpine with user/pass <code>habit</code>/<code>habit</code>, db <code>habitdb</code>, data persisted in the named volume <code>pgdata</code>. A healthcheck (<code>pg_isready</code>) must pass before anything depends on it.</li>
+  <li><strong>backend</strong> builds the Python image, installs <code>requirements.txt</code>, and runs uvicorn on port 8000. <code>depends_on: condition: service_healthy</code> is what sequences it after db.</li>
+  <li><strong>frontend</strong> is a two-stage build: node:20 runs <code>npm run build</code>, then nginx:alpine serves the static <code>dist/</code> on port 5173→80 and <strong>proxies <code>/api/</code> to <code>backend:8000</code></strong>.</li>
+</ul>
+
+<div class="callout warn">
+  <span class="label">Heads-up (planted quirk)</span>
+  The login form comes pre-filled with <code>demo@habit.app</code> — that user <em>does not exist</em>. Real seeded accounts (password <code>demo123</code> for all): <code>admin@habit.app</code>, <code>user1@habit.app</code>, <code>user2@habit.app</code>. <code>user1</code> has the most data — use it.
+</div>
+
+<h2>2 · The map</h2>
+<div class="diagram">
+  <div class="row"><div class="node"><div class="t">Browser</div><div class="d">React app (static)</div></div></div>
+  <div class="arrow">↓ http://localhost:5173</div>
+  <div class="row"><div class="node"><div class="t">frontend :5173</div><div class="d">nginx · serves dist/ · proxies /api/</div></div></div>
+  <div class="arrow">↓ /api/* proxied</div>
+  <div class="row"><div class="node"><div class="t">backend :8000</div><div class="d">FastAPI · SQLAlchemy · uvicorn</div></div></div>
+  <div class="arrow">↓ psycopg2 · SQL</div>
+  <div class="row"><div class="node"><div class="t">db :5432</div><div class="d">PostgreSQL 16 · volume pgdata</div></div></div>
+</div>
+
+<p>Three tables total (<code>backend/app/models.py</code>): <code>users</code>, <code>habits</code> (belongs to a user; has <code>cheers</code>, <code>archived</code>, <code>cadence</code>, <code>target_per_week</code>), <code>habit_logs</code> (one row per completed day of a habit; optional <code>note</code>). That's the whole domain.</p>
+
+<h2>3 · Trace one request: login</h2>
+<p>Follow this path in the actual files — it's the backbone of the app:</p>
+<ol class="steps">
+  <li><code>frontend/src/components/Login.jsx</code> — form submit calls <code>api("/login", { method: "POST", body: { email, password } })</code>.</li>
+  <li><code>frontend/src/api.js</code> — thin <code>fetch</code> wrapper; prefixes <code>/api</code>, JSON-encodes the body, throws on non-2xx using the backend's <code>detail</code> message.</li>
+  <li><code>backend/app/routers/auth_routes.py</code> — <code>POST /api/login</code> looks up <code>User</code> by email, compares the password <strong>in plaintext</strong>, and returns <code>token: str(user.id)</code>. Remember that — it comes back in Lesson 4.</li>
+  <li><code>Login.jsx</code> stores the token via <code>setToken()</code> (localStorage) and hands the user object up to <code>App.jsx</code>, which flips from <code>&lt;Login/&gt;</code> to <code>&lt;Home/&gt;</code>. There is <strong>no router</strong> — screens swap by conditional rendering.</li>
+  <li>Every later call sends <code>Authorization: Bearer &lt;token&gt;</code>. <code>backend/app/deps.py</code> — <code>get_current_user</code> — turns that header back into a <code>User</code> by literally doing <code>int(token)</code>.</li>
+</ol>
+
+<p>One more trace, the one you'll modify on Friday: <strong>check-in</strong>. <code>Dashboard.jsx</code> → <code>api("/habits/3/checkin", { method: "POST" })</code> → <code>habits.py:checkin</code> → guard: already logged today? → 409. Otherwise insert a <code>HabitLog</code> row with today's date, commit, bump an in-memory <code>STREAK_CACHE</code>, <code>sleep(0.35)</code>, return.</p>
+
+<h2>4 · The superpower: /docs</h2>
+<p>FastAPI generates interactive API docs for free. Open <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a>. Click <em>Authorize</em>, enter token <code>1</code> (that's admin's user id — yes, really), and you can call every endpoint from the browser. This is the fastest way to learn the API, and it's fair game during an assessment.</p>
+
+<div class="callout">
+  <span class="label">Do this now</span>
+  In /docs: run <code>GET /api/dashboard</code>, then <code>GET /api/habits/1/stats</code>. Compare the shapes — the dashboard returns totals + a 84-day heatmap + per-habit streaks; the habit stats endpoint returns one habit's streaks and last-7 days.
+</div>
+
+<h2>5 · Check yourself</h2>
+<div id="quiz" class="quiz"></div>
+
+<h2>6 · Two-minute lab</h2>
+<ul class="steps">
+  <li><code>docker compose exec db psql -U habit -d habitdb -c "SELECT count(*) FROM habit_logs;"</code> — see the data with your own eyes (~60k+ rows: the seed writes 4 years of daily logs).</li>
+  <li>Open <code>http://localhost:8000/api/healthz</code> — the smoke-test endpoint interviewers love to see checked.</li>
+</ul>
+
+<div class="ask">💬 <strong>Stuck or curious?</strong> Ask your teacher (the agent) anything — that's what it's for. "Why nginx?", "what's uvicorn?", "why is the token just a number?" are all fair questions.</div>
+
+<div class="lesson-nav">
+  <a href="0002-fastapi-survival-kit.html">Next → Lesson 2: FastAPI survival kit</a>
+  <a href="../reference/0001-endpoint-map.html">Reference: endpoint map &amp; runbook</a>
+</div>
+
+<p><strong>Primary source for deeper reading:</strong> <a href="https://fastapi.tiangolo.com/tutorial/first-steps/">FastAPI — First Steps</a> (official tutorial; 10 minutes, covers everything in §3–4 of this lesson).</p>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script>
+renderQuiz(document.getElementById("quiz"), {
+  title: "Check yourself",
+  questions: [
+    {
+      q: "Which service actually talks to PostgreSQL?",
+      options: [
+        { text: "the backend", correct: true, why: "FastAPI uses SQLAlchemy + psycopg2 to reach Postgres. nginx and the browser never touch SQL." },
+        { text: "the frontend", correct: false, why: "nginx only serves static files and proxies /api/ — it has no database driver." },
+        { text: "the browser", correct: false, why: "The browser only ever speaks HTTP to nginx; all SQL happens server-side." }
+      ]
+    },
+    {
+      q: "After a successful login, the token you receive is…",
+      options: [
+        { text: "the user id", correct: true, why: "auth_routes.py returns token: str(user.id). No signature, no expiry — a planted issue you'll justify a fix for later." },
+        { text: "a signed JWT", correct: false, why: "Nothing in requirements.txt or the code signs anything. It is literally the user id as a string." },
+        { text: "a random secret", correct: false, why: "No randomness involved — deps.py converts the token straight back to int and loads that user." }
+      ]
+    },
+    {
+      q: "Later requests authenticate using…",
+      options: [
+        { text: "the Authorization header", correct: true, why: "api.js attaches 'Authorization: Bearer <token>' and deps.py reads it via the Header parameter." },
+        { text: "a session cookie", correct: false, why: "No cookies are set anywhere in this app — check api.js: only headers." },
+        { text: "a custom query param", correct: false, why: "The token never travels in the URL; search the code for 'Bearer' to confirm." }
+      ]
+    },
+    {
+      q: "The database tables get created during…",
+      options: [
+        { text: "the startup lifespan", correct: true, why: "main.py's lifespan calls Base.metadata.create_all(engine) then seed_if_empty() — every boot." },
+        { text: "the docker build step", correct: false, why: "The Dockerfile only installs dependencies; it never starts the app or touches the DB." },
+        { text: "the first API request", correct: false, why: "Creation happens on app startup before any request is served." }
+      ]
+    },
+    {
+      q: "The interactive API documentation lives at…",
+      options: [
+        { text: "localhost:8000/docs", correct: true, why: "FastAPI serves Swagger UI at /docs on the backend port — your fastest exploration tool." },
+        { text: "localhost:5173/docs", correct: false, why: "5173 is nginx serving the React build; there is no /docs route there." },
+        { text: "localhost:8000/api/docs", correct: false, why: "Docs are mounted at the app root, not under the /api prefix used by routers." }
+      ]
+    }
+  ]
+});
+</script>
+</body>
+</html>
