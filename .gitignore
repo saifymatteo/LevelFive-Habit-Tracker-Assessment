@@ -1,0 +1,18 @@
+VERSIONED.md
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node
+node_modules/
+dist/
+
+# env / local
+.env
+pgdata/
+.DS_Store
+
+.codegraph
+.pi
