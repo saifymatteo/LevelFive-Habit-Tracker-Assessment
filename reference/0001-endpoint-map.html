@@ -47,7 +47,7 @@
     <tr><td>SQL shell</td><td><code>docker compose exec db psql -U habit -d habitdb</code></td></tr>
     <tr><td>Row counts</td><td><code>SELECT (SELECT count(*) FROM users) u, (SELECT count(*) FROM habits) h, (SELECT count(*) FROM habit_logs) l;</code></td></tr>
     <tr><td>Inspect a habit's logs</td><td><code>SELECT log_date, note FROM habit_logs WHERE habit_id = 1 ORDER BY log_date DESC LIMIT 10;</code></td></tr>
-    <tr><td>Interactive API docs</td><td>Browser → <code>localhost:8000/docs</code> (Authorize with token <code>1</code>)</td></tr>
+    <tr><td>Interactive API docs</td><td>Browser → <code>localhost:8000/docs</code>: browse schemas + execute <code>POST /api/login</code> (no auth needed). The <code>authorization</code> field on protected endpoints is a decoy — Swagger renders it but never sends it. For authed calls: PowerShell pair (Lesson 1 §4) or <code>curl -H "Authorization: Bearer 1"</code></td></tr>
     <tr><td>App</td><td>Browser → <code>localhost:5173</code></td></tr>
   </tbody>
 </table>

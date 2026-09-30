@@ -60,12 +60,27 @@ docker compose up --build</code></pre>
 
 <p>One more trace, the one you'll modify on Friday: <strong>check-in</strong>. <code>Dashboard.jsx</code> → <code>api("/habits/3/checkin", { method: "POST" })</code> → <code>habits.py:checkin</code> → guard: already logged today? → 409. Otherwise insert a <code>HabitLog</code> row with today's date, commit, bump an in-memory <code>STREAK_CACHE</code>, <code>sleep(0.35)</code>, return.</p>
 
-<h2>4 · The superpower: /docs</h2>
-<p>FastAPI generates interactive API docs for free. Open <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a>. Click <em>Authorize</em>, enter token <code>1</code> (that's admin's user id — yes, really), and you can call every endpoint from the browser. This is the fastest way to learn the API, and it's fair game during an assessment.</p>
+<h2>4 · The superpower: /docs (and its one trap)</h2>
+<p>FastAPI generates interactive API docs for free at <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a>. What works right now, with zero code changes: browse every endpoint's schema, hit <em>Try it out</em> on <code>POST /api/login</code> (needs no auth), and trigger the automatic 422 validation errors with bad bodies.</p>
+<p><strong>The trap:</strong> protected endpoints render an <code>authorization</code> input in their Try-it-out form. Fill it with <code>Bearer 1</code>, execute… and you still get <strong>401 “Missing bearer token”</strong>. Verified live: Swagger UI renders the field but <em>never sends an Authorization header from a request parameter</em> — that header is reserved for declared security schemes, and this repo (unmodified) declares none. Don't burn assessment minutes on that field.</p>
+<p>Two ways to test protected endpoints without touching the repo:</p>
+<pre><code># PowerShell - login, then call with the returned token
+$r = Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/login `
+  -ContentType application/json -Body '{"email":"admin@habit.app","password":"demo123"}'
+Invoke-RestMethod -Uri http://localhost:8000/api/dashboard `
+  -Headers @{ Authorization = "Bearer $($r.token)" }</code></pre>
+<p>Or, on the /docs tab open devtools console (F12):</p>
+<pre><code>fetch("/api/dashboard", { headers: { Authorization: "Bearer 1" } })
+  .then(r =&gt; r.json()).then(console.log)</code></pre>
 
 <div class="callout">
   <span class="label">Do this now</span>
-  In /docs: run <code>GET /api/dashboard</code>, then <code>GET /api/habits/1/stats</code>. Compare the shapes — the dashboard returns totals + a 84-day heatmap + per-habit streaks; the habit stats endpoint returns one habit's streaks and last-7 days.
+  Execute <code>POST /api/login</code> in /docs (works unauthenticated). Then run the PowerShell pair above and compare <code>/api/dashboard</code> vs <code>/api/habits/1/stats</code> — totals + 84-day heatmap + per-habit streaks, vs one habit's streaks and last-7 days.
+</div>
+
+<div class="callout good">
+  <span class="label">Assessment gold (say it, don't apply it)</span>
+  “The authorization field in /docs is a decoy — Swagger UI never sends an Authorization <em>header parameter</em>; that header belongs to security schemes. Declaring <code>APIKeyHeader(name="Authorization")</code> in the dependency would make the Authorize button appear and work, with zero runtime change.” That sentence, unprompted, is OpenAPI understanding interviewers rarely hear.
 </div>
 
 <h2>5 · Check yourself</h2>

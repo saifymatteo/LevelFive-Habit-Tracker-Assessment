@@ -81,10 +81,11 @@ return {"id": habit.id, "name": habit.name}                      # success: any 
 
 <h2>Lab — feel validation work (5 min)</h2>
 <ol class="steps">
-  <li>Open <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a>, authorize with token <code>1</code>.</li>
-  <li><code>POST /api/habits</code> with body <code>{}</code> → read the 422 response: it names the missing field <code>name</code>.</li>
-  <li>Retry with <code>{"name": "Assessment prep"}</code> → 200, and the habit appears in the UI at localhost:5173.</li>
-  <li><code>GET /api/habits/9999</code>… actually try <code>DELETE /api/habits/9999</code> → read the 404 <code>detail</code>. That's <code>HTTPException</code> doing its job.</li>
+  <li>Open <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a> and run <code>POST /api/login</code> via Try it out — it needs no auth. (The <code>authorization</code> field on other endpoints is a decoy: Swagger never sends it — Lesson 1 §4.)</li>
+  <li>Stash the token in PowerShell: <code>$t = (Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/login -ContentType application/json -Body '{"email":"admin@habit.app","password":"demo123"}').token</code></li>
+  <li><code>POST /api/habits</code> with <code>{}</code>: <code>Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/habits -Headers @{Authorization="Bearer $t"} -ContentType application/json -Body '{}'</code> → read the 422: it names the missing field.</li>
+  <li>Retry with <code>-Body '{"name":"Assessment prep"}'</code> → 200, and the habit appears in the UI at localhost:5173.</li>
+  <li><code>Invoke-RestMethod -Method Delete -Uri http://localhost:8000/api/habits/9999 -Headers @{Authorization="Bearer $t"}</code> → read the 404 <code>detail</code> — that's <code>HTTPException</code> doing its job.</li>
 </ol>
 
 <h2>Check yourself</h2>
