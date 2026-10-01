@@ -1,3 +1,9 @@
-Set-Location $PSScriptRoot\frontend
-npm install
-npm run dev
+Push-Location $PSScriptRoot\frontend
+
+try {
+    npm install
+    npm run dev
+}
+finally {
+    Pop-Location
+}
