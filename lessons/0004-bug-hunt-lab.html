@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 4 — Guided bug hunt</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  .station { border: 1px solid #d8d4c8; border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .station h3 { margin-top: 0; }
+  .where { font-family: monospace; font-size: 0.8em; color: #6b6257; font-weight: normal; display: block; margin-top: 2px; }
+  details { margin: 8px 0 8px 0; padding-left: 12px; border-left: 3px solid #e4ddcf; }
+  summary { cursor: pointer; font-weight: bold; color: #4a4238; }
+  details p { margin: 6px 0; }
+  code { background: #f4f1e9; padding: 1px 4px; border-radius: 3px; }
+  pre code { display: block; padding: 10px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Lesson 4 — Guided bug hunt: what can be fixed in this repo</h1>
+<div class="meta">
+  <span class="chip">⏱ 30–45 min</span>
+  <span class="chip">Skill: spot → prove → fix → justify</span>
+  <span class="chip">Prereq: Lesson 2</span>
+</div>
+
+<p><strong>How this works:</strong> this is a <em>guide</em>, not an answer key. Each station gives you a place to look and a way to prove your suspicion. Form your own opinion <em>before</em> opening the hints — on Friday, the justification matters more than the fix. Hints escalate: what class of issue → how to prove it → fix sketch + the one-line interview justification.</p>
+
+<h2>First: the triage frame (this is what gets scored)</h2>
+<p>Every suspicious thing you find lands in one of three buckets. Practice <em>saying the bucket out loud</em>:</p>
+<ol class="steps">
+  <li><strong>Definite bug</strong> — fix it, say why: "any user can delete anyone's habit; the guard is one line."</li>
+  <li><strong>Judgment call</strong> — discuss the trade-off: "cross-user search looks intentional — the UI prints <em>owner #N</em> — but it leaks user ids; I'd confirm with the team."</li>
+  <li><strong>Looks deliberate — leave it, mention it</strong>: "this sleep has a comment claiming a rate limit; I'd flag the latency cost rather than rip it out silently."</li>
+</ol>
+<p>Mislabeling bucket 2 as a bug (or ignoring a bucket-1 bug because it's subtle) is the actual failure mode. Now the stations.</p>
+
+<h2>Tier 1 — the five most likely assessment tasks</h2>
+
+<div class="station">
+<h3>Station 1 — The check-in trio <span class="where">backend/app/routers/habits.py:133–154</span></h3>
+<p><strong>Look first:</strong> between line 139 and 150, what does the code verify about <em>who owns</em> this habit? Then look at line 152: where does the returned <code>streak</code> number come from, and what does <code>analytics.py</code> compute it from instead? And line 153 — what does that sleep cost on every check-in?</p>
+<p><strong>Prove it:</strong> pick a habit id that is <em>not</em> yours (search results show <code>owner #N</code>), then<br>
+<code>Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/habits/&lt;their-id&gt;/checkin" -Headers @{Authorization="Bearer 1"}</code><br>
+Success = you just wrote a log to someone else's habit. Then restart the backend (<code>Run.ps1</code>) and check in again — compare the returned <code>streak</code> with what <code>GET /api/habits/&lt;id&gt;/stats</code> says.</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Three separate issues share one endpoint: a missing authorization check (bucket 1), state derived from an in-process dict instead of the database (bucket 1 — it resets on restart and ignores deleted logs), and an artificial latency on the hottest write path (bucket 2 — the comment is plausible, the placement is not).</p></details>
+<details><summary>Hint 2 · proof &amp; blast radius</summary><p>After a restart the cache is empty, so the first check-in reports <code>streak: 1</code> while <code>/stats</code> (which recomputes from real logs) reports the true value — two endpoints, two different truths, same data. The sleep blocks a threadpool worker per request; under load that's your throughput ceiling.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Add the ownership guard (see Station 3's one-liner). Replace the cache read with the real calculation (<code>current_streak</code> on the habit's log dates) or drop the cache entirely — the honest fix is to return what the DB proves. For the sleep: move it out of the request path (background task / queue) or make it conditional, and <em>say the trade-off</em>: "I kept the rate-limit intent but stopped taxing every user for it."</p></details>
+</div>
+
+<div class="station">
+<h3>Station 2 — The streak that lies about today <span class="where">backend/app/analytics.py:4–10</span></h3>
+<p><strong>Look first:</strong> <code>day = date.today()</code>, then <code>while day in dates</code>. What happens when the user did everything right <em>yesterday</em> but hasn't checked in yet today — is the streak really zero?</p>
+<p><strong>Prove it:</strong> find any habit whose dashboard card does <em>not</em> show "Done ✓" but whose history shows an unbroken chain up to yesterday. Its card will read "🔥 0 day streak".</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Logic bug, and a subtle one: the function conflates "checked in today" with "streak alive". Most habit apps grant grace until the day ends — this one doesn't.</p></details>
+<details><summary>Hint 2 · proof &amp; blast radius</summary><p><code>current_streak</code> has 4 callers across <code>habits.py</code> and <code>stats.py</code> — fixing it in one place fixes the card, the detail page, and the dashboard at once. That's a nice blast-radius observation to say out loud.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Anchor the walk at <em>yesterday</em> when today isn't logged: <code>day = date.today() if date.today() in dates else date.today() - timedelta(days=1)</code>, then walk back. Justification: "a streak shouldn't hit zero at midnight; apps grant the current day as grace."</p></details>
+</div>
+
+<div class="station">
+<h3>Station 3 — The IDOR family: delete, logs, stats, cheer <span class="where">backend/app/routers/habits.py:117–130, 157–168, 171–191, 194–219</span></h3>
+<p><strong>Look first:</strong> each of these does <code>db.get(Habit, habit_id)</code> and then… what check is missing before touching data? Compare with <code>create_habit</code>, which correctly stamps <code>user_id=user.id</code>.</p>
+<p><strong>Prove it (destructive — on the demo DB only):</strong><br>
+<code>Invoke-RestMethod -Method Delete -Uri "http://localhost:8000/api/habits/&lt;their-id&gt;" -Headers @{Authorization="Bearer 1"}</code> → <code>{"ok":true}</code>. Reading someone's <code>/logs</code> or <code>/stats</code> with your token proves the same class without destroying data — prefer that in a live interview.</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Broken access control (IDOR) — authenticate-but-not-authorize. One missing line, four-plus endpoints. Reading logs of another user is a data leak; deleting is worse.</p></details>
+<details><summary>Hint 2 · proof &amp; blast radius</summary><p>The frontend never triggers it (it only shows your own habits), which is why it survives demoing — that's a great sentence: "the UI hides it, the API doesn't."</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>One guard, repeated or extracted: after fetching, <code>if habit.user_id != user.id: raise HTTPException(404, "Habit not found")</code> — 404, not 403, so you don't confirm existence to strangers. Mention extracting it into a shared dependency or helper to show DRY thinking.</p></details>
+</div>
+
+<div class="station">
+<h3>Station 4 — Login: plaintext passwords, token = user id <span class="where">backend/app/routers/auth_routes.py:16–24</span></h3>
+<p><strong>Look first:</strong> line 19 compares the password how? Line 22 returns what as the token? Then open <code>deps.py</code>: what does it do with that number?</p>
+<p><strong>Prove it:</strong> <code>Invoke-RestMethod -Uri http://localhost:8000/api/habits -Headers @{Authorization="Bearer 2"}</code> — you are user2 now. No login, no secret, just arithmetic.</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Two for one: credentials stored/compared in plaintext (the model field is even named <code>hashed_password</code>), and an unguessable-but-guessable token — the token <em>is</em> the primary key. Both are bucket-1.</p></details>
+<details><summary>Hint 2 · proof &amp; blast radius</summary><p>Every protected endpoint trusts this token, so the fix's blast radius is "everything" — which is also why it's a great interview topic: small change, systemic meaning.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Hash on create with <code>bcrypt</code>/<code>passlib</code>, verify with <code>verify()</code>; issue an opaque random token (or a signed JWT with expiry) stored server-side. Justification: "auth depends on tokens being unguessable; sequential ints are effectively usernames."</p></details>
+</div>
+
+<div class="station">
+<h3>Station 5 — SQL injection in search <span class="where">backend/app/routers/habits.py:26–41</span></h3>
+<p><strong>Look first:</strong> line 32–37: the query is an f-string inside <code>text()</code>. Where does <code>{q}</code> end up?</p>
+<p><strong>Prove it:</strong><br>
+<code>Invoke-RestMethod -Uri 'http://localhost:8000/api/habits/search?q=a%27%20OR%201%3D1--' -Headers @{Authorization="Bearer 1"}</code><br>
+The <code>'</code> closes the literal, <code>OR 1=1</code> makes the WHERE always true, <code>--</code> comments out the rest — you get <em>every</em> habit from <em>every</em> user.</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Classic SQL injection — bucket 1, textbook. Also note the result leaks <code>user_id</code> for all users (ties back to the bucket-2 search discussion).</p></details>
+<details><summary>Hint 2 · proof &amp; blast radius</summary><p>This is the only place in the repo that builds SQL by string — everything else uses the ORM. Saying that ("it's the one outlier") shows you read the whole codebase.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Bind parameters: <code>text("... WHERE name ILIKE :q ...")</code> with <code>q=f"%{search}%"</code> passed as a bound value — or just use the ORM: <code>db.query(Habit).filter(Habit.name.ilike(f"%{q}%"))</code>. Justification: "user input never becomes SQL text; the ORM/binding does the escaping."</p></details>
+</div>
+
+<h2>Tier 2 — performance &amp; consistency (say these, fix only if asked)</h2>
+
+<div class="station">
+<h3>Station 6 — The dashboard that reads 60k rows per call <span class="where">backend/app/routers/stats.py:15–82</span></h3>
+<p><strong>Look first:</strong> lines 29–34 load <em>all</em> log rows for the user into Python. Lines 23–28: which habits are included — compare with <code>list_habits</code>'s <code>archived.is_(False)</code> filter. Line 17/21: what does the <code>user_id</code> query param allow?</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Performance (full-table read for aggregates), a consistency bug (archived habits count toward totals here but are hidden in the list — the two endpoints disagree), and the same user_id IDOR as Station 7.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Aggregate in SQL (<code>GROUP BY date</code> for the heatmap, window functions or grouped queries for streaks), filter archived consistently, drop or guard the <code>user_id</code> param. Justification: "the dashboard is the most-polled endpoint; it should return aggregates, not rows."</p></details>
+</div>
+
+<div class="station">
+<h3>Station 7 — N+1 in the habit list <span class="where">backend/app/routers/habits.py:44–83</span></h3>
+<p><strong>Look first:</strong> the loop at lines 59–70 issues how many queries <em>per habit</em>? With N habits, how many round-trips?</p>
+<details><summary>Hint 1 · what class of issue</summary><p>N+1 queries — two extra per habit. Also: the <code>user_id</code> param (line 50) lets any caller list anyone's habits — same family as Station 6.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>One grouped query for totals (<code>GROUP BY habit_id</code>) and one for today's logs, then stitch in Python. Justification: "constant number of queries regardless of habit count."</p></details>
+</div>
+
+<div class="station">
+<h3>Station 8 — The frontend that polls forever <span class="where">frontend/src/components/Dashboard.jsx:12–33</span></h3>
+<p><strong>Look first:</strong> line 31 sets an interval — how often? And inside <code>refresh</code>, the loop at 20–23 awaits each stats call <em>sequentially</em>. Multiply that by the interval and by Station 6's row count.</p>
+<details><summary>Hint 1 · what class of issue</summary><p>Frontend amplification: a 4-second full refresh (dashboard + list + N stats calls, each heavy) — the backend issues compound. Open devtools → Network and watch the wall of requests.</p></details>
+<details><summary>Hint 3 · fix sketch</summary><p>Poll slower or on focus/visibility, parallelize with <code>Promise.all</code>, or push one aggregate endpoint that replaces N stats calls. Justification: "fix the amplification before micro-optimizing each call."</p></details>
+</div>
+
+<h2>The 60-minute drill (do this once before Friday)</h2>
+<ol class="steps">
+  <li>Pick <strong>one</strong> Tier-1 station (Station 1 or 2 are the most likely to be the actual task).</li>
+  <li>Write a 5-line spec in <code>.scratch/&lt;feature&gt;/spec.md</code> (repo convention — free process points).</li>
+  <li>Fix it. Add the missing guard / correct the anchor / bind the parameter — smallest correct change.</li>
+  <li>Prove it with the PowerShell pair from Lesson 1 §4 (before AND after).</li>
+  <li>Say the justification out loud, in one sentence, twice: what was wrong, why your fix is the right size.</li>
+</ol>
+
+<h2>Check yourself</h2>
+<div id="quiz" class="quiz"></div>
+
+<div class="ask">💬 <strong>Stuck or curious?</strong> Ask your teacher (the agent). Good next questions: "why 404 and not 403 for ownership?", "how would a test catch the streak bug?", "what's the difference between this IDOR and the user_id param?"</div>
+
+<div class="lesson-nav">
+  <a href="0002-fastapi-survival-kit.html">← Lesson 2: FastAPI survival kit</a>
+  <a href="../reference/0001-endpoint-map.html">Reference: endpoint map &amp; runbook</a>
+  <span>Lesson 3 (SQLAlchemy deep-dive) still to come</span>
+</div>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script>
+renderQuiz(document.getElementById("quiz"), {
+  title: "Check yourself",
+  questions: [
+    {
+      q: "Backend restarts, then one check-in happens. What does the check-in response report as streak?",
+      options: [
+        { text: "Streak one, though the real streak is huge", correct: true,
+          why: "STREAK_CACHE lives in process memory: after a restart it starts empty, so the first check-in reports 1 no matter how long the real chain is. /stats computes from actual logs — the two disagree." },
+        { text: "Streak zero, though the user just checked in", correct: false,
+          why: "The cache starts empty, not at zero-minus-one: .get(id, 0) + 1 after restart reports 1." },
+        { text: "Streak stuck, though yesterday was logged too", correct: false,
+          why: "Nothing sticks — the cache is empty after restart, so the counter restarts from scratch." }
+      ]
+    },
+    {
+      q: "One guard closes the whole IDOR family (delete, logs, stats, cheer). Which?",
+      options: [
+        { text: "Verify the habit's user_id matches the caller's id", correct: true,
+          why: "Existence is already checked (404); what's missing is ownership. Compare after fetching — and return 404, not 403, so you don't confirm other users' resource ids exist." },
+        { text: "Verify the habit's archived flag before every write", correct: false,
+          why: "Archived filtering is a product question; it wouldn't stop user A touching user B's habit." },
+        { text: "Verify the habit's existence in the database first", correct: false,
+          why: "Already done — db.get returns None and the endpoint 404s. Ownership is the missing check." }
+      ]
+    },
+    {
+      q: "Safest first fix for the f-string SQL in /habits/search?",
+      options: [
+        { text: "Swap to a bound parameter with ILIKE", correct: true,
+          why: "Bound parameters keep user input out of SQL text entirely — the driver handles escaping. The ORM's .ilike() is the same idea one level higher." },
+        { text: "Escape the user text with a replace", correct: false,
+          why: "Hand-rolled escaping is exactly the half-fix that gets re-broken — quote handling, wildcards, and encodings each reintroduce holes." },
+        { text: "Validate the query with a regex allowlist", correct: false,
+          why: "An allowlist may cap the damage but user text still becomes SQL text — one missed character and it's open again." }
+      ]
+    }
+  ]
+});
+</script>
+</body>
+</html>
